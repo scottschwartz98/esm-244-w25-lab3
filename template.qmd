@@ -9,6 +9,7 @@ format: html
 library(tidyverse)
 library(tidymodels)
 library(here)
+library(janitor)
 
 t_df<-read_csv(here("data", "titanic_survival.csv"))
 ```
@@ -17,8 +18,22 @@ t_df<-read_csv(here("data", "titanic_survival.csv"))
 ## ML Framework
 
 Write a description of how you go about applying machine learning problems. If you drew a diagram, share with a neighbor and discuss.
-
-
+step one is to clean data up so that it is readable and clean. seperate data into training and test data. Run linear models on the training data to create the intial predicotr model. Then run the model on the test data.
+1. gather data
+2. develop a hypothesis 
+3. map out the plan, get psuedocode
+4. clean data/ what variables/ look at the data 
+5. choosing metrics 
+6.data split into testing and training
+7. building models
+- creating models, what variables
+- data preprocessing 
+-train model on training data
+-tune the model
+-evaluate the model
+-model selection
+8. finalize the model (train on whole dataset)
+9.interpret results/visualize/ommunicate
 
 
 ## Tidymodels Overview
@@ -41,10 +56,38 @@ In real life, we would have to go out and collect the data. Today, we will use t
 
 Take 15 minutes to explore the data. Are there any immediate changes to the data that we need to change? What relationships can you see through graphs? What variables could be of interest to predict survival of passengers on the Titanic?
 
+```{r}
+t_df_clean <- t_df |> 
+  select(survived, age, pclass, name, sex, sib_sp, parch, fare, ) 
+ 
+vis_tdf <- ggplot(data= t_df_clean, aes( x= survived, y= fare,))+
+geom_boxplot()
 
+vis_tdf
+
+ggplot(data = t_df_clean, aes(x =))
+
+```
+
+
+
+```{r}
+surv_df <- t_df %>%
+  mutate(survived = factor(survived),   ### categorical outcome variables need to be factors
+         pclass   = factor(pclass)) %>% ### turn some predictors to factor
+  select(-cabin, -ticket) ### lots of NAs here - and not likely to be very helpful
+
+
+ggplot(surv_df, aes(x = pclass, fill = survived)) +
+  geom_bar()
+
+ggplot(surv_df, aes(x = age, fill = survived)) +
+  geom_histogram()
+
+
+```
 
 ## Data Split
-
 We will set aside (“partition”) a portion of the data for building and comparing our models (80%), and a portion for testing our models after we’ve selected the best one (20%). NOT the same as folds - that will happen in the training/validation step.
 
 ```{r}
@@ -111,12 +154,12 @@ glm_rec<-recipe(survived ~ sex + pclass, data = surv_train_df)
 # steps we need to do to prepare data for lasso
 
 lasso_rec<-recipe(survived~.,data=surv_train_df) %>%
-  update_role(passenger_id, new_role = "ID") %>%
-  step_rm(name,age) %>%
-  step_unknown(all_nominal(),-all_outcomes()) |> 
-  step_dummy(all_nominal(),-all_outcomes()) |>
-  step_zv(all_numeric(),-all_outcomes()) |> 
-  step_normalize(all_numeric(),-all_outcomes())
+  update_role(passenger_id, new_role = "ID") %>% #marker not a dependent variblae
+  step_rm(name,age) %>% # to many na we can't use this data 
+  step_unknown(all_nominal(),-all_outcomes()) |> # if you see an na, make a new factor class known as unknown
+  step_dummy(all_nominal(),-all_outcomes()) |> 
+  step_zv(all_numeric(),-all_outcomes()) |> # 0 variance get rid of them 
+  step_normalize(all_numeric(),-all_outcomes()) #normalize all numeric data on the same scale of comparison
 
 ```
 
@@ -149,7 +192,18 @@ Now fill in the following code chunk to fit the lasso model. Create a table (or 
 
 ```{r}
 
+lasso_wf <- workflow() %>%
+  add_recipe(lasso_rec) %>%
+  add_model(lasso_md) 
 
+lasso_fit<-lasso_wf %>%
+  fit(surv_train_df)
+
+lasso_test<-surv_test_df |>
+  mutate(predict(lasso_fit, new_data = surv_test_df)) |> 
+  mutate(predict(lasso_fit,new_data = surv_test_df, type='prob'))
+
+table(lasso_test$survived, lasso_test$.pred_class)
 ```
 
 ### Evaluate Performance
@@ -168,7 +222,12 @@ lasso_test |>
 Calculate the `ROC AUC` for each model. Use the `roc_auc` function from yardstick.
 
 ```{r}
+### Calculate area under curve - 50% is random guessing, 100% is perfect classifier
+log_test |> 
+  yardstick::roc_auc(truth = survived, .pred_0)
 
+lasso_test |> 
+  yardstick::roc_auc(truth = survived, .pred_0)
 ```
 
 
@@ -216,6 +275,8 @@ We will finalize the model by fitting the model to the entire dataset.
 ```{r}
 final_log<-log_wf |>
   last_fit(surv_split)
+useable_log <- final_log |>
+extract_fit_parsnip()
 ```
 
 
@@ -229,7 +290,7 @@ final_log |>
   extract_fit_parsnip() |>
   tidy() |> 
   mutate(odds=exp(estimate),
-         prob=odds/(1+estimate))
+         prob=odds/(1+odds))
 ```
 
 Please give this a go on your own with the post-lab exercise. I will be walking around to assist.
